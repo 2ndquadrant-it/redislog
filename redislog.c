@@ -78,8 +78,8 @@ static void guc_on_assign_reopen_int(int newval, void *extra);
 
 /* Redis specific prototypes */
 static void redis_log_hook(ErrorData *edata);
-static void redis_close_connection();
-static bool redis_open_connection();
+static void redis_close_connection(void);
+static bool redis_open_connection(void);
 static bool redis_log_shipper(char *data, int len);
 
 /*
