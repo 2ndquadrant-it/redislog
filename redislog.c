@@ -329,15 +329,15 @@ redis_log_hook(ErrorData *edata)
 
 	/* Username */
 	if (MyProcPort)
-		append_json_literal(&buf, "user", MyProcPort->user_name, true);
+		append_json_literal(&buf, "user_name", MyProcPort->user_name, true);
 
 	/* Database name */
 	if (MyProcPort)
-		append_json_literal(&buf, "dbname", MyProcPort->database_name, true);
+		append_json_literal(&buf, "database_name", MyProcPort->database_name, true);
 
 	/* Process ID */
 	if (MyProcPid != 0)
-		appendStringInfo(&buf, "\"pid\":%d,", MyProcPid);
+		appendStringInfo(&buf, "\"process_id\":%d,", MyProcPid);
 
 	/* Remote host and port */
 	if (MyProcPort && MyProcPort->remote_host)
@@ -357,12 +357,12 @@ redis_log_hook(ErrorData *edata)
 	/* Virtual transaction id */
 	/* keep VXID format in sync with lockfuncs.c */
 	if (MyProc != NULL && MyProc->backendId != InvalidBackendId)
-		appendStringInfo(&buf, "\"vxid\":\"%d/%u\",",
+		appendStringInfo(&buf, "\"virtual_transaction_id\":\"%d/%u\",",
 						 MyProc->backendId, MyProc->lxid);
 
 	/* Transaction id */
 	if (txid != InvalidTransactionId)
-		appendStringInfo(&buf, "\"txid\":%u,", GetTopTransactionIdIfAny());
+		appendStringInfo(&buf, "\"transaction_id\":%u,", GetTopTransactionIdIfAny());
 
 	/* Error severity */
 	append_json_literal(&buf, "error_severity",
@@ -370,7 +370,7 @@ redis_log_hook(ErrorData *edata)
 
 	/* SQL state code */
 	if (edata->sqlerrcode != ERRCODE_SUCCESSFUL_COMPLETION)
-		append_json_literal(&buf, "state_code",
+		append_json_literal(&buf, "sql_state_code",
 						  unpack_sql_state(edata->sqlerrcode), true);
 
 	/* Error detail or Error detail log */
