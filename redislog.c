@@ -38,9 +38,11 @@
 #include "lib/stringinfo.h"
 #include "postmaster/syslogger.h"
 #include "storage/proc.h"
+#include "tcop/tcopprot.h"
 #include "utils/elog.h"
 #include "utils/guc.h"
 #include "utils/json.h"
+#include "utils/ps_status.h"
 
 #include "hiredis/hiredis.h"
 
@@ -62,6 +64,9 @@ char  *Redislog_key = NULL;
 /* Log timestamp */
 #define LOG_TIMESTAMP_LEN 128
 static char log_time[LOG_TIMESTAMP_LEN];
+
+/* Session start timestamp */
+static char start_time[LOG_TIMESTAMP_LEN];
 
 /* Redis context */
 static redisContext *redis_context = NULL;
@@ -236,6 +241,27 @@ redis_log_shipper(char *data, int len)
 }
 
 /*
+ * setup formatted_start_time
+ * (taken from backend/utils/error/elog.c)
+ */
+static void
+setup_formatted_start_time(void)
+{
+	pg_time_t	stamp_time = (pg_time_t) MyStartTime;
+
+	/*
+	 * Note: we expect that guc.c will ensure that log_timezone is set up (at
+	 * least with a minimal GMT value) before Log_line_prefix can become
+	 * nonempty or CSV mode can be selected.
+	 *
+	 * Note: we don't have the exact millisecond here.
+	 */
+	pg_strftime(start_time, LOG_TIMESTAMP_LEN,
+				"%Y-%m-%dT%H:%M:%S%z",
+				pg_localtime(&stamp_time, log_timezone));
+}
+
+/*
  * setup_formatted_log_time
  * (taken from jsonlog.c)
  */
@@ -262,6 +288,36 @@ setup_formatted_log_time(void)
 	/* 'paste' milliseconds into place... */
 	sprintf(msbuf, ".%03d", (int) (tv.tv_usec / 1000));
 	strncpy(log_time + 19, msbuf, 4);
+}
+
+/*
+ * is_log_level_output -- is elevel logically >= log_min_level?
+ *
+ * We use this for tests that should consider LOG to sort out-of-order,
+ * between ERROR and FATAL.  Generally this is the right thing for testing
+ * whether a message should go to the postmaster log, whereas a simple >=
+ * test is correct for testing whether the message should go to the client.
+ * (taken from backend/utils/elog.c)
+ */
+static bool
+is_log_level_output(int elevel, int log_min_level)
+{
+	if (elevel == LOG || elevel == COMMERROR)
+	{
+		if (log_min_level == LOG || log_min_level <= ERROR)
+			return true;
+	}
+	else if (log_min_level == LOG)
+	{
+		/* elevel != LOG */
+		if (elevel >= FATAL)
+			return true;
+	}
+	/* Neither is LOG */
+	else if (elevel >= log_min_level)
+		return true;
+
+	return false;
 }
 
 /*
@@ -305,6 +361,7 @@ redis_log_hook(ErrorData *edata)
 {
 	StringInfoData	buf;
 	TransactionId	txid = GetTopTransactionIdIfAny();
+	bool		print_stmt = false;
 
 	/*
 	 * This is one of the few places where we'd rather not inherit a static
@@ -354,6 +411,27 @@ redis_log_hook(ErrorData *edata)
 		appendStringInfo(&buf, "\"session_id\":\"%lx.%x\",",
 						 (long) MyStartTime, MyProcPid);
 
+	/* PS display */
+	if (MyProcPort)
+	{
+		StringInfoData msgbuf;
+		const char *psdisp;
+		int displen;
+
+		initStringInfo(&msgbuf);
+
+		psdisp = get_ps_display(&displen);
+		appendBinaryStringInfo(&msgbuf, psdisp, displen);
+		append_json_literal(&buf, "command_tag", msgbuf.data, true);
+
+		pfree(msgbuf.data);
+	}
+
+	/* session start timestamp */
+	if (start_time[0] == '\0')
+		setup_formatted_start_time();
+	append_json_literal(&buf, "session_start_time", start_time, true);
+
 	/* Virtual transaction id */
 	/* keep VXID format in sync with lockfuncs.c */
 	if (MyProc != NULL && MyProc->backendId != InvalidBackendId)
@@ -388,9 +466,25 @@ redis_log_hook(ErrorData *edata)
 		append_json_literal(&buf, "internal_query",
 						  edata->internalquery, true);
 
+	/* if printed internal query, print internal pos too */
+	if (edata->internalpos > 0 && edata->internalquery != NULL)
+		appendStringInfo(&buf, "\"internal_query_pos\":%d,", edata->internalpos);
+
 	/* Error context */
 	if (edata->context)
 		append_json_literal(&buf, "context", edata->context, true);
+
+	/* user query --- only reported if not disabled by the caller */
+	if (is_log_level_output(edata->elevel, log_min_error_statement) &&
+		debug_query_string != NULL &&
+		!edata->hide_stmt)
+		print_stmt = true;
+	if (print_stmt)
+		append_json_literal(&buf, "query", debug_query_string, true);
+
+	/* user query position -- only reposted if not disabled by the caller */
+	if (print_stmt && edata->cursorpos > 0)
+		appendStringInfo(&buf, "\"query_pos\":%d,", edata->cursorpos);
 
 	/* File error location */
 	if (Log_error_verbosity >= PGERROR_VERBOSE)
