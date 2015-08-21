@@ -1,0 +1,25 @@
+before_install:
+  - sudo apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" install libhiredis-dev
+  - sudo update-alternatives --remove-all postmaster.1.gz
+  - sudo /etc/init.d/postgresql stop
+  - sudo apt-get -y --purge remove postgresql libpq-dev libpq5 postgresql-client-common postgresql-common
+  - sudo rm -rf /var/lib/postgresql
+  - wget -O - "https://alioth.debian.org/scm/loggerhead/pkg-postgresql/postgresql-common/trunk/download/head:/apt.postgresql.org.s-20130224224205-px3qyst90b3xp8zj-1/apt.postgresql.org.sh" | sed '/^read enter$/s//#\0/' | sudo bash
+  - sudo apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" install postgresql-common postgresql-$PGVERSION postgresql-server-dev-$PGVERSION
+  - sudo pg_dropcluster --stop $PGVERSION main
+
+env:
+  matrix:
+    - PGVERSION=9.4
+    - PGVERSION=9.3
+    - PGVERSION=9.2
+
+language: c
+compiler:
+  - clang
+  - gcc
+
+script:
+  - make && sudo make install
+  - sudo pg_createcluster --start $PGVERSION main -o shared_preload_libraries='redislog' -- -A trust
+  - psql -U postgres postgres -c 'show redislog.host'
