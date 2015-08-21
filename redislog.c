@@ -180,7 +180,7 @@ redis_open_connection()
 		redis_context = redisConnectWithTimeout(Redislog_host, Redislog_port, timeout);
 
 		if (redis_context == NULL || redis_context->err)
-    {
+		{
 			/*
 			 * Something went wrong.
 			 */
@@ -207,12 +207,12 @@ redis_log_shipper(char *data, int len)
 	while(attempts <= 1)
 	{
 		if (!redis_open_connection())
-    {
+		{
 			/*
 			 * Connection failed. This message will not be sent.
 			 */
 			return false;
-    }
+		}
 
 		/* Push the event using binary safe API */
 		reply = redisCommand(redis_context, "RPUSH %s %b", Redislog_key, data, (size_t) len);
@@ -225,11 +225,11 @@ redis_log_shipper(char *data, int len)
 		/* something occurred, close the connection and try again once */
 		attempts++;
 
-    /* Frees the reply object in Redis */
+		/* Frees the reply object in Redis */
 		if (reply)
 			freeReplyObject(reply);
 
-    /* Close the Redis connection */
+		/* Close the Redis connection */
 		redis_close_connection();
 	}
 	return false;
@@ -442,15 +442,15 @@ _PG_init(void)
 {
 	/* Set up GUCs */
 	DefineCustomStringVariable("redislog.host",
-    "Redis server host name or IP address.",
-    NULL,
-    &Redislog_host,
-    "127.0.0.1",
-    PGC_SIGHUP,
-    GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY,
-    NULL,
-    &guc_on_assign_reopen_string,
-    NULL);
+	  "Redis server host name or IP address.",
+	  NULL,
+	  &Redislog_host,
+	  "127.0.0.1",
+	  PGC_SIGHUP,
+	  GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY,
+	  NULL,
+	  &guc_on_assign_reopen_string,
+	  NULL);
 
 	DefineCustomIntVariable("redislog.port",
 	  "Redis server port number.",
@@ -466,28 +466,28 @@ _PG_init(void)
 	  NULL);
 
 	DefineCustomIntVariable("redislog.connection_timeout",
-    "Redis server connection timeout.",
-    NULL,
-    &Redislog_timeout,
-    1000,
-    1,
-    INT_MAX,
-    PGC_SIGHUP,
-    GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY | GUC_UNIT_MS,
-    NULL,
-    NULL,
-    NULL);
+	  "Redis server connection timeout.",
+	  NULL,
+	  &Redislog_timeout,
+	  1000,
+	  1,
+	  INT_MAX,
+	  PGC_SIGHUP,
+	  GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY | GUC_UNIT_MS,
+	  NULL,
+	  NULL,
+	  NULL);
 
 	DefineCustomStringVariable("redislog.key",
-    "Redis server key name.",
-    NULL,
-    &Redislog_key,
-    "postgres",
-    PGC_SIGHUP,
-    GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY,
-    NULL,
-    NULL,
-    NULL);
+	  "Redis server key name.",
+	  NULL,
+	  &Redislog_key,
+	  "postgres",
+	  PGC_SIGHUP,
+	  GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY,
+	  NULL,
+	  NULL,
+	  NULL);
 
 	prev_log_hook = emit_log_hook;
 	emit_log_hook = redis_log_hook;
