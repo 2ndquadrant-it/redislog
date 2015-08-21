@@ -271,7 +271,7 @@ setup_formatted_log_time(void)
  * (taken from jsonlog.c)
  */
 static void
-append_json_literal(StringInfo buf, char *key, char *value, bool is_comma)
+append_json_literal(StringInfo buf, const char *key, const char *value, bool is_comma)
 {
 	StringInfoData literal_json;
 
