@@ -60,6 +60,8 @@ char  *Redislog_host = NULL;
 int   Redislog_port = 6379;
 int   Redislog_timeout = 1000;
 char  *Redislog_key = NULL;
+int   Redislog_min_error_statement = ERROR;
+int   Redislog_min_messages = WARNING;
 
 /* Log timestamp */
 #define LOG_TIMESTAMP_LEN 128
@@ -86,6 +88,26 @@ static void redis_log_hook(ErrorData *edata);
 static void redis_close_connection(void);
 static bool redis_open_connection(void);
 static bool redis_log_shipper(char *data, int len);
+
+/*
+ * Enum definition for redislog.min_error_statement and redislog.min_messages
+ */
+static const struct config_enum_entry server_message_level_options[] = {
+	{"debug", DEBUG2, true},
+	{"debug5", DEBUG5, false},
+	{"debug4", DEBUG4, false},
+	{"debug3", DEBUG3, false},
+	{"debug2", DEBUG2, false},
+	{"debug1", DEBUG1, false},
+	{"info", INFO, false},
+	{"notice", NOTICE, false},
+	{"warning", WARNING, false},
+	{"error", ERROR, false},
+	{"log", LOG, false},
+	{"fatal", FATAL, false},
+	{"panic", PANIC, false},
+	{NULL, 0, false}
+};
 
 /*
  * Useful for HUP triggered host reassignment: close the connection, a new one
@@ -364,6 +386,14 @@ redis_log_hook(ErrorData *edata)
 	bool		print_stmt = false;
 
 	/*
+	 * Check if the log has to be written, if not just exit.
+	 */
+	if (!is_log_level_output(edata->elevel, Redislog_min_messages))
+	{
+		goto quickExit;
+	}
+
+	/*
 	 * This is one of the few places where we'd rather not inherit a static
 	 * variable's value from the postmaster.  But since we will, reset it when
 	 * MyProcPid changes.
@@ -475,7 +505,7 @@ redis_log_hook(ErrorData *edata)
 		append_json_literal(&buf, "context", edata->context, true);
 
 	/* user query --- only reported if not disabled by the caller */
-	if (is_log_level_output(edata->elevel, log_min_error_statement) &&
+	if (is_log_level_output(edata->elevel, Redislog_min_error_statement) &&
 		debug_query_string != NULL &&
 		!edata->hide_stmt)
 		print_stmt = true;
@@ -521,6 +551,8 @@ redis_log_hook(ErrorData *edata)
 
 	/* Cleanup */
 	pfree(buf.data);
+
+quickExit:
 
 	/* Continue chain to previous hook */
 	if (prev_log_hook)
@@ -579,6 +611,33 @@ _PG_init(void)
 	  "postgres",
 	  PGC_SIGHUP,
 	  GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY,
+	  NULL,
+	  NULL,
+	  NULL);
+
+	DefineCustomEnumVariable("redislog.min_error_statement",
+	  "Controls which SQL statements that cause an error condition are "
+	  "recorded in the server log.",
+	  "Each level includes all the levels that follow it. The later "
+	  "the level, the fewer messages are sent.",
+	  &Redislog_min_error_statement,
+	  log_min_error_statement,
+	  server_message_level_options,
+	  PGC_SUSET,
+	  GUC_NOT_IN_SAMPLE,
+	  NULL,
+	  NULL,
+	  NULL);
+
+	DefineCustomEnumVariable("redislog.min_messages",
+	  "Set the message levels that are logged.",
+	  "Each level includes all the levels that follow it. The later "
+	  "the level, the fewer messages are sent.",
+	  &Redislog_min_messages,
+	  WARNING,
+	  server_message_level_options,
+	  PGC_SUSET,
+	  GUC_NOT_IN_SAMPLE,
 	  NULL,
 	  NULL,
 	  NULL);

@@ -20,6 +20,8 @@ The module can be activated by adding the following parameters in
     redislog.host = '127.0.0.1'
     redislog.port = 6379
     redislog.key = 'postgres'
+    redislog.min_error_statement = error
+    redislog.min_messages = warning
 
 ## TODO
 
