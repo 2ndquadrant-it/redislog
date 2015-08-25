@@ -385,6 +385,8 @@ redis_log_hook(ErrorData *edata)
 	TransactionId	txid = GetTopTransactionIdIfAny();
 	bool		print_stmt = false;
 
+	/* static counter for line numbers */
+	static long log_line_number = 0;
 
 	/*
 	 * This is one of the few places where we'd rather not inherit a static
@@ -393,6 +395,7 @@ redis_log_hook(ErrorData *edata)
 	 */
 	if (lastPid != MyProcPid)
 	{
+		log_line_number = 0;
 		lastPid = MyProcPid;
 		start_time[0] = '\0';
 		redis_close_connection();
@@ -405,6 +408,9 @@ redis_log_hook(ErrorData *edata)
 	{
 		goto quickExit;
 	}
+
+	log_line_number++;
+
 	initStringInfo(&buf);
 
 	/* Initialize string */
@@ -441,6 +447,10 @@ redis_log_hook(ErrorData *edata)
 	if (MyProcPid != 0)
 		appendStringInfo(&buf, "\"session_id\":\"%lx.%x\",",
 						 (long) MyStartTime, MyProcPid);
+
+	/* Process ID */
+	if (MyProcPid != 0)
+		appendStringInfo(&buf, "\"session_line_num\":%ld,", log_line_number);
 
 	/* PS display */
 	if (MyProcPort)
