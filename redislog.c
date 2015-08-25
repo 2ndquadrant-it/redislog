@@ -385,13 +385,6 @@ redis_log_hook(ErrorData *edata)
 	TransactionId	txid = GetTopTransactionIdIfAny();
 	bool		print_stmt = false;
 
-	/*
-	 * Check if the log has to be written, if not just exit.
-	 */
-	if (!is_log_level_output(edata->elevel, Redislog_min_messages))
-	{
-		goto quickExit;
-	}
 
 	/*
 	 * This is one of the few places where we'd rather not inherit a static
@@ -404,6 +397,13 @@ redis_log_hook(ErrorData *edata)
 		redis_close_connection();
 	}
 
+	/*
+	 * Check if the log has to be written, if not just exit.
+	 */
+	if (!is_log_level_output(edata->elevel, Redislog_min_messages))
+	{
+		goto quickExit;
+	}
 	initStringInfo(&buf);
 
 	/* Initialize string */
