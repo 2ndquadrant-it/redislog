@@ -394,6 +394,7 @@ redis_log_hook(ErrorData *edata)
 	if (lastPid != MyProcPid)
 	{
 		lastPid = MyProcPid;
+		start_time[0] = '\0';
 		redis_close_connection();
 	}
 
