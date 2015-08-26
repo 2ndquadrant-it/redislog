@@ -417,8 +417,7 @@ redis_log_hook(ErrorData *edata)
 	appendStringInfoChar(&buf, '{');
 
 	/* Timestamp */
-	if (log_time[0] == '\0')
-		setup_formatted_log_time();
+	setup_formatted_log_time();
 	append_json_literal(&buf, "@timestamp", log_time, true);
 
 	/* Username */
