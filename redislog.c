@@ -38,9 +38,11 @@
 #include "lib/stringinfo.h"
 #include "postmaster/syslogger.h"
 #include "storage/proc.h"
+#include "tcop/tcopprot.h"
 #include "utils/elog.h"
 #include "utils/guc.h"
 #include "utils/json.h"
+#include "utils/ps_status.h"
 
 #include "hiredis/hiredis.h"
 
@@ -58,10 +60,15 @@ char  *Redislog_host = NULL;
 int   Redislog_port = 6379;
 int   Redislog_timeout = 1000;
 char  *Redislog_key = NULL;
+int   Redislog_min_error_statement = ERROR;
+int   Redislog_min_messages = WARNING;
 
 /* Log timestamp */
 #define LOG_TIMESTAMP_LEN 128
 static char log_time[LOG_TIMESTAMP_LEN];
+
+/* Session start timestamp */
+static char start_time[LOG_TIMESTAMP_LEN];
 
 /* Redis context */
 static redisContext *redis_context = NULL;
@@ -81,6 +88,26 @@ static void redis_log_hook(ErrorData *edata);
 static void redis_close_connection(void);
 static bool redis_open_connection(void);
 static bool redis_log_shipper(char *data, int len);
+
+/*
+ * Enum definition for redislog.min_error_statement and redislog.min_messages
+ */
+static const struct config_enum_entry server_message_level_options[] = {
+	{"debug", DEBUG2, true},
+	{"debug5", DEBUG5, false},
+	{"debug4", DEBUG4, false},
+	{"debug3", DEBUG3, false},
+	{"debug2", DEBUG2, false},
+	{"debug1", DEBUG1, false},
+	{"info", INFO, false},
+	{"notice", NOTICE, false},
+	{"warning", WARNING, false},
+	{"error", ERROR, false},
+	{"log", LOG, false},
+	{"fatal", FATAL, false},
+	{"panic", PANIC, false},
+	{NULL, 0, false}
+};
 
 /*
  * Useful for HUP triggered host reassignment: close the connection, a new one
@@ -236,6 +263,27 @@ redis_log_shipper(char *data, int len)
 }
 
 /*
+ * setup formatted_start_time
+ * (taken from backend/utils/error/elog.c)
+ */
+static void
+setup_formatted_start_time(void)
+{
+	pg_time_t	stamp_time = (pg_time_t) MyStartTime;
+
+	/*
+	 * Note: we expect that guc.c will ensure that log_timezone is set up (at
+	 * least with a minimal GMT value) before Log_line_prefix can become
+	 * nonempty or CSV mode can be selected.
+	 *
+	 * Note: we don't have the exact millisecond here.
+	 */
+	pg_strftime(start_time, LOG_TIMESTAMP_LEN,
+				"%Y-%m-%dT%H:%M:%S%z",
+				pg_localtime(&stamp_time, log_timezone));
+}
+
+/*
  * setup_formatted_log_time
  * (taken from jsonlog.c)
  */
@@ -265,13 +313,43 @@ setup_formatted_log_time(void)
 }
 
 /*
+ * is_log_level_output -- is elevel logically >= log_min_level?
+ *
+ * We use this for tests that should consider LOG to sort out-of-order,
+ * between ERROR and FATAL.  Generally this is the right thing for testing
+ * whether a message should go to the postmaster log, whereas a simple >=
+ * test is correct for testing whether the message should go to the client.
+ * (taken from backend/utils/elog.c)
+ */
+static bool
+is_log_level_output(int elevel, int log_min_level)
+{
+	if (elevel == LOG || elevel == COMMERROR)
+	{
+		if (log_min_level == LOG || log_min_level <= ERROR)
+			return true;
+	}
+	else if (log_min_level == LOG)
+	{
+		/* elevel != LOG */
+		if (elevel >= FATAL)
+			return true;
+	}
+	/* Neither is LOG */
+	else if (elevel >= log_min_level)
+		return true;
+
+	return false;
+}
+
+/*
  * append_json_literal
  * Append to given StringInfo a JSON with a given key and a value
  * not yet made literal.
  * (taken from jsonlog.c)
  */
 static void
-append_json_literal(StringInfo buf, char *key, char *value, bool is_comma)
+append_json_literal(StringInfo buf, const char *key, const char *value, bool is_comma)
 {
 	StringInfoData literal_json;
 
@@ -305,6 +383,10 @@ redis_log_hook(ErrorData *edata)
 {
 	StringInfoData	buf;
 	TransactionId	txid = GetTopTransactionIdIfAny();
+	bool		print_stmt = false;
+
+	/* static counter for line numbers */
+	static long log_line_number = 0;
 
 	/*
 	 * This is one of the few places where we'd rather not inherit a static
@@ -313,9 +395,21 @@ redis_log_hook(ErrorData *edata)
 	 */
 	if (lastPid != MyProcPid)
 	{
+		log_line_number = 0;
 		lastPid = MyProcPid;
+		start_time[0] = '\0';
 		redis_close_connection();
 	}
+
+	/*
+	 * Check if the log has to be written, if not just exit.
+	 */
+	if (!is_log_level_output(edata->elevel, Redislog_min_messages))
+	{
+		goto quickExit;
+	}
+
+	log_line_number++;
 
 	initStringInfo(&buf);
 
@@ -329,15 +423,15 @@ redis_log_hook(ErrorData *edata)
 
 	/* Username */
 	if (MyProcPort)
-		append_json_literal(&buf, "user", MyProcPort->user_name, true);
+		append_json_literal(&buf, "user_name", MyProcPort->user_name, true);
 
 	/* Database name */
 	if (MyProcPort)
-		append_json_literal(&buf, "dbname", MyProcPort->database_name, true);
+		append_json_literal(&buf, "database_name", MyProcPort->database_name, true);
 
 	/* Process ID */
 	if (MyProcPid != 0)
-		appendStringInfo(&buf, "\"pid\":%d,", MyProcPid);
+		appendStringInfo(&buf, "\"process_id\":%d,", MyProcPid);
 
 	/* Remote host and port */
 	if (MyProcPort && MyProcPort->remote_host)
@@ -354,15 +448,40 @@ redis_log_hook(ErrorData *edata)
 		appendStringInfo(&buf, "\"session_id\":\"%lx.%x\",",
 						 (long) MyStartTime, MyProcPid);
 
+	/* Process ID */
+	if (MyProcPid != 0)
+		appendStringInfo(&buf, "\"session_line_num\":%ld,", log_line_number);
+
+	/* PS display */
+	if (MyProcPort)
+	{
+		StringInfoData msgbuf;
+		const char *psdisp;
+		int displen;
+
+		initStringInfo(&msgbuf);
+
+		psdisp = get_ps_display(&displen);
+		appendBinaryStringInfo(&msgbuf, psdisp, displen);
+		append_json_literal(&buf, "command_tag", msgbuf.data, true);
+
+		pfree(msgbuf.data);
+	}
+
+	/* session start timestamp */
+	if (start_time[0] == '\0')
+		setup_formatted_start_time();
+	append_json_literal(&buf, "session_start_time", start_time, true);
+
 	/* Virtual transaction id */
 	/* keep VXID format in sync with lockfuncs.c */
 	if (MyProc != NULL && MyProc->backendId != InvalidBackendId)
-		appendStringInfo(&buf, "\"vxid\":\"%d/%u\",",
+		appendStringInfo(&buf, "\"virtual_transaction_id\":\"%d/%u\",",
 						 MyProc->backendId, MyProc->lxid);
 
 	/* Transaction id */
 	if (txid != InvalidTransactionId)
-		appendStringInfo(&buf, "\"txid\":%u,", GetTopTransactionIdIfAny());
+		appendStringInfo(&buf, "\"transaction_id\":%u,", GetTopTransactionIdIfAny());
 
 	/* Error severity */
 	append_json_literal(&buf, "error_severity",
@@ -370,7 +489,7 @@ redis_log_hook(ErrorData *edata)
 
 	/* SQL state code */
 	if (edata->sqlerrcode != ERRCODE_SUCCESSFUL_COMPLETION)
-		append_json_literal(&buf, "state_code",
+		append_json_literal(&buf, "sql_state_code",
 						  unpack_sql_state(edata->sqlerrcode), true);
 
 	/* Error detail or Error detail log */
@@ -388,9 +507,25 @@ redis_log_hook(ErrorData *edata)
 		append_json_literal(&buf, "internal_query",
 						  edata->internalquery, true);
 
+	/* if printed internal query, print internal pos too */
+	if (edata->internalpos > 0 && edata->internalquery != NULL)
+		appendStringInfo(&buf, "\"internal_query_pos\":%d,", edata->internalpos);
+
 	/* Error context */
 	if (edata->context)
 		append_json_literal(&buf, "context", edata->context, true);
+
+	/* user query --- only reported if not disabled by the caller */
+	if (is_log_level_output(edata->elevel, Redislog_min_error_statement) &&
+		debug_query_string != NULL &&
+		!edata->hide_stmt)
+		print_stmt = true;
+	if (print_stmt)
+		append_json_literal(&buf, "query", debug_query_string, true);
+
+	/* user query position -- only reposted if not disabled by the caller */
+	if (print_stmt && edata->cursorpos > 0)
+		appendStringInfo(&buf, "\"query_pos\":%d,", edata->cursorpos);
 
 	/* File error location */
 	if (Log_error_verbosity >= PGERROR_VERBOSE)
@@ -427,6 +562,8 @@ redis_log_hook(ErrorData *edata)
 
 	/* Cleanup */
 	pfree(buf.data);
+
+quickExit:
 
 	/* Continue chain to previous hook */
 	if (prev_log_hook)
@@ -485,6 +622,33 @@ _PG_init(void)
 	  "postgres",
 	  PGC_SIGHUP,
 	  GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY,
+	  NULL,
+	  NULL,
+	  NULL);
+
+	DefineCustomEnumVariable("redislog.min_error_statement",
+	  "Controls which SQL statements that cause an error condition are "
+	  "recorded in the server log.",
+	  "Each level includes all the levels that follow it. The later "
+	  "the level, the fewer messages are sent.",
+	  &Redislog_min_error_statement,
+	  log_min_error_statement,
+	  server_message_level_options,
+	  PGC_SUSET,
+	  GUC_NOT_IN_SAMPLE,
+	  NULL,
+	  NULL,
+	  NULL);
+
+	DefineCustomEnumVariable("redislog.min_messages",
+	  "Set the message levels that are logged.",
+	  "Each level includes all the levels that follow it. The later "
+	  "the level, the fewer messages are sent.",
+	  &Redislog_min_messages,
+	  WARNING,
+	  server_message_level_options,
+	  PGC_SUSET,
+	  GUC_NOT_IN_SAMPLE,
 	  NULL,
 	  NULL,
 	  NULL);
