@@ -65,10 +65,10 @@ int   Redislog_min_messages = WARNING;
 
 /* Log timestamp */
 #define LOG_TIMESTAMP_LEN 128
-static char log_time[LOG_TIMESTAMP_LEN];
+static char formatted_log_time[LOG_TIMESTAMP_LEN];
 
 /* Session start timestamp */
-static char start_time[LOG_TIMESTAMP_LEN];
+static char formatted_start_time[LOG_TIMESTAMP_LEN];
 
 /* Redis context */
 static redisContext *redis_context = NULL;
@@ -278,7 +278,7 @@ setup_formatted_start_time(void)
 	 *
 	 * Note: we don't have the exact millisecond here.
 	 */
-	pg_strftime(start_time, LOG_TIMESTAMP_LEN,
+	pg_strftime(formatted_start_time, LOG_TIMESTAMP_LEN,
 				"%Y-%m-%dT%H:%M:%S%z",
 				pg_localtime(&stamp_time, log_timezone));
 }
@@ -302,14 +302,14 @@ setup_formatted_log_time(void)
 	 * least with a minimal GMT value) before Log_line_prefix can become
 	 * nonempty or CSV mode can be selected.
 	 */
-	pg_strftime(log_time, LOG_TIMESTAMP_LEN,
+	pg_strftime(formatted_log_time, LOG_TIMESTAMP_LEN,
 				/* leave room for milliseconds... */
 				"%Y-%m-%dT%H:%M:%S    %z",
 				pg_localtime(&stamp_time, log_timezone));
 
 	/* 'paste' milliseconds into place... */
 	sprintf(msbuf, ".%03d", (int) (tv.tv_usec / 1000));
-	strncpy(log_time + 19, msbuf, 4);
+	strncpy(formatted_log_time + 19, msbuf, 4);
 }
 
 /*
@@ -397,7 +397,7 @@ redis_log_hook(ErrorData *edata)
 	{
 		log_line_number = 0;
 		lastPid = MyProcPid;
-		start_time[0] = '\0';
+		formatted_start_time[0] = '\0';
 		redis_close_connection();
 	}
 
@@ -418,7 +418,7 @@ redis_log_hook(ErrorData *edata)
 
 	/* Timestamp */
 	setup_formatted_log_time();
-	append_json_literal(&buf, "@timestamp", log_time, true);
+	append_json_literal(&buf, "@timestamp", formatted_log_time, true);
 
 	/* Username */
 	if (MyProcPort)
@@ -468,9 +468,9 @@ redis_log_hook(ErrorData *edata)
 	}
 
 	/* session start timestamp */
-	if (start_time[0] == '\0')
+	if (formatted_start_time[0] == '\0')
 		setup_formatted_start_time();
-	append_json_literal(&buf, "session_start_time", start_time, true);
+	append_json_literal(&buf, "session_start_time", formatted_start_time, true);
 
 	/* Virtual transaction id */
 	/* keep VXID format in sync with lockfuncs.c */
