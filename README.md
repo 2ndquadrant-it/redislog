@@ -22,6 +22,7 @@ The module can be activated by adding the following parameters in
     redislog.key = 'postgres'
     redislog.min_error_statement = error
     redislog.min_messages = warning
+    redislog.ship_to_redis_only = true
 
 ## TODO
 
@@ -32,11 +33,11 @@ The module can be activated by adding the following parameters in
 ## Authors
 
 * Marco Nenciarini <marco.nenciarini@2ndquadrant.it>
+* Leonardo Cecchi <leonardo.cecchi@2ndquadrant.it>
 * Gabriele Bartolini <gabriele.bartolini@2ndquadrant.it>
 
 Thanks to Michael Paquier for the initial exchange of ideas and for his
 previous work on [jsonlog](https://github.com/michaelpq/pg_plugins/blob/master/jsonlog/jsonlog.c).
-
 
 ## Licence
 

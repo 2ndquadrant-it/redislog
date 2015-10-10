@@ -62,6 +62,7 @@ int   Redislog_timeout = 1000;
 char  *Redislog_key = NULL;
 int   Redislog_min_error_statement = ERROR;
 int   Redislog_min_messages = WARNING;
+bool  Redislog_ship_to_redis_only = TRUE;
 
 /* Log timestamp */
 #define LOG_TIMESTAMP_LEN 128
@@ -384,6 +385,7 @@ redis_log_hook(ErrorData *edata)
 	StringInfoData	buf;
 	TransactionId	txid = GetTopTransactionIdIfAny();
 	bool		print_stmt = false;
+	bool		send_status = false;
 
 	/* static counter for line numbers */
 	static long log_line_number = 0;
@@ -557,7 +559,14 @@ redis_log_hook(ErrorData *edata)
 	appendStringInfoChar(&buf, '\n');
 
 	/* Send the data to Redis */
-	redis_log_shipper(buf.data, buf.len);
+	send_status = redis_log_shipper(buf.data, buf.len);
+
+	/* Skip sending the event to the server, if it was correctly
+	 * shipped to Redis and if 'ship_to_redis_only' is set to true
+	 */
+	if (Redislog_ship_to_redis_only && send_status) {
+		edata->output_to_server = false;
+	}
 
 	/* Cleanup */
 	pfree(buf.data);
@@ -641,11 +650,26 @@ _PG_init(void)
 
 	DefineCustomEnumVariable("redislog.min_messages",
 	  "Set the message levels that are logged.",
-	  "Each level includes all the levels that follow it. The later "
+	  "Each level includes all the levels that follow it. The higher "
 	  "the level, the fewer messages are sent.",
 	  &Redislog_min_messages,
 	  WARNING,
 	  server_message_level_options,
+	  PGC_SUSET,
+	  GUC_NOT_IN_SAMPLE,
+	  NULL,
+	  NULL,
+	  NULL);
+
+	DefineCustomBoolVariable("redislog.ship_to_redis_only",
+	  "Send log messages to Redis only.",
+	  "If set to true, send log messages to Redis only and skip "
+	  "journaling them into the main PostgreSQL log. Use the "
+	  "PostgreSQL main logger facility for fallback purposes only, "
+	  "in case no Redis service is available. "
+	  "By default it is set to false.",
+	  &Redislog_ship_to_redis_only,
+	  FALSE,
 	  PGC_SUSET,
 	  GUC_NOT_IN_SAMPLE,
 	  NULL,
