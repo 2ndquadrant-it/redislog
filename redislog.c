@@ -62,6 +62,7 @@ int   Redislog_timeout = 1000;
 char  *Redislog_key = NULL;
 int   Redislog_min_error_statement = ERROR;
 int   Redislog_min_messages = WARNING;
+bool  Redislog_ship_to_redis_only = TRUE;
 
 /* Log timestamp */
 #define LOG_TIMESTAMP_LEN 128
@@ -384,6 +385,7 @@ redis_log_hook(ErrorData *edata)
 	StringInfoData	buf;
 	TransactionId	txid = GetTopTransactionIdIfAny();
 	bool		print_stmt = false;
+	bool		send_status = false;
 
 	/* static counter for line numbers */
 	static long log_line_number = 0;
@@ -557,7 +559,11 @@ redis_log_hook(ErrorData *edata)
 	appendStringInfoChar(&buf, '\n');
 
 	/* Send the data to Redis */
-	redis_log_shipper(buf.data, buf.len);
+	send_status = redis_log_shipper(buf.data, buf.len);
+
+	if (Redislog_ship_to_redis_only && send_status) {
+		edata->output_to_server = false;
+	}
 
 	/* Cleanup */
 	pfree(buf.data);
@@ -646,6 +652,20 @@ _PG_init(void)
 	  &Redislog_min_messages,
 	  WARNING,
 	  server_message_level_options,
+	  PGC_SUSET,
+	  GUC_NOT_IN_SAMPLE,
+	  NULL,
+	  NULL,
+	  NULL);
+
+	DefineCustomBoolVariable("redislog.ship_to_redis_only",
+	  "Controls whenever to send messages to the logging collector.",
+	  "If false logging messages will be always sent to the others "
+	  "hooks in the logging collector. If true only the events "
+	  "which can't be sent to Redis (ad ex. for a network failure) "
+	  "are sent to the logging collector.",
+	  &Redislog_ship_to_redis_only,
+	  FALSE,
 	  PGC_SUSET,
 	  GUC_NOT_IN_SAMPLE,
 	  NULL,
