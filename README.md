@@ -9,6 +9,8 @@ Thanks to hooks made available by PostgreSQL through `elog.c`, `redislog` is a l
 ## Requirements
 
 * [Hiredis library](https://github.com/redis/hiredis)
+* postgres-devel package (or similar, for the pgxs headers)
+* openssl-devel package (or similar)
 * A Redis server for data collection
 
 ## Installation
@@ -23,6 +25,26 @@ The module can be activated by adding the following parameters in
     redislog.min_error_statement = error
     redislog.min_messages = warning
     redislog.ship_to_redis_only = true
+
+
+## Event layout
+
+This is an example of an event JSON document created by `redislog`:
+
+```
+{
+  "@timestamp": "2015-10-20T15:13:58.042+0200",
+  "process_id": 7240,
+  "session_id": "56263e15.1c48",
+  "session_line_num": 1,
+  "session_start_time": "2015-10-20T15:13:57+0200",
+  "error_severity": "LOG",
+  "hint": "Future log output will appear in directory \"pg_log\".",
+  "message": "redirecting log output to logging collector process"
+}
+```
+
+
 
 ## TODO
 
