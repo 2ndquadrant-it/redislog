@@ -17,12 +17,13 @@ The module can be activated by adding the following parameters in
 `postgresql.conf`:
 
     shared_preload_libraries = 'redislog'
-    redislog.host = '127.0.0.1'
+    redislog.hosts = '127.0.0.1'
     redislog.port = 6379
     redislog.key = 'postgres'
     redislog.min_error_statement = error
     redislog.min_messages = warning
     redislog.ship_to_redis_only = true
+    redislog.shuffle_hosts = false
 
 ## TODO
 

@@ -22,4 +22,4 @@ compiler:
 script:
   - make && sudo make install
   - sudo pg_createcluster --start $PGVERSION main -o shared_preload_libraries='redislog' -- -A trust
-  - psql -U postgres postgres -c 'show redislog.host'
+  - psql -U postgres postgres -c 'show redislog.hosts'
