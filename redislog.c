@@ -205,7 +205,10 @@ redis_open_connection()
 	{
 		timeout.tv_sec = Redislog_timeout / 1000;
 		timeout.tv_usec = Redislog_timeout % 1000 * 1000;
-		redis_context = redisConnectWithTimeout(Redislog_host, Redislog_port, timeout);
+		if (Redislog_host[0] == '/')
+			redis_context = redisConnectUnixWithTimeout(Redislog_host, timeout);
+		else
+			redis_context = redisConnectWithTimeout(Redislog_host, Redislog_port, timeout);
 
 		if (redis_context == NULL || redis_context->err)
 		{
