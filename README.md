@@ -13,23 +13,110 @@ Thanks to hooks made available by PostgreSQL through `elog.c`, `redislog` is a l
 
 ## Installation
 
-The module can be activated by adding the following parameters in
-`postgresql.conf`:
+`redislog` can be installed as any other PostgreSQL extension by executing:
+
+    make
+    make install
+
+In order to activate the module, you only need to add the following
+configuration option in `postgresql.conf`:
 
     shared_preload_libraries = 'redislog'
-    redislog.hosts = '127.0.0.1'
-    redislog.port = 6379
-    redislog.key = 'postgres'
-    redislog.min_error_statement = error
-    redislog.min_messages = warning
-    redislog.ship_to_redis_only = true
-    redislog.shuffle_hosts = false
 
-## TODO
+`redislog` will use the default values for any configuration option.
 
-* Ship to multiple Redis servers
-* Allow DBAs to specify which fields to include in the JSON object
-* ...
+For a detailed list of options, see the following section.
+
+## Configuration options
+
+redislog.hosts
+
+: List of `HOST[:PORT]` pairs separated by commas. If no port is specified,
+  the default 6379 is assumed. By default, `redislog.hosts` is set
+  to `127.0.0.1`. In case of more than a host, the actual behaviour is
+  influenced by the `redislog.shuffle_hosts` option:
+
+    - if set to `on`, multiple hosts are used for load balancing purposes
+
+    - if set to `off`, multiple hosts are used for high availability purposes
+      and defined as a priority ordered list.
+
+
+redislog.shuffle\_hosts
+
+: Only if `redislog.hosts` defines more than a host. If set to `on`,
+  the order of hosts is shuffled and hosts are used in a load balancing
+  scenario.
+
+
+redislog.connection\_timeout
+
+: Redis server connection timeout in milliseconds (by default 1000).
+
+
+redislog.key
+
+: Redis server key name (by default `postgres`).
+
+
+redislog.ship\_to\_redis\_only
+
+: If set to `on`, log messages that are correctly sent to Redis are
+  not journaled into the main PostgreSQL log (by default `off`).
+
+
+redislog.fields
+
+: List of fields to be placed in the output JSON object. Users have
+  the opportunity to customise the list of fields as well as the
+  name of each key in the objects through the following syntax:
+
+        redislog.fields = 'FIELD[:NAME][, ...]'
+
+  By default, the list is set to:
+
+  - `user_name`
+  - `database_name`
+  - `process_id`
+  - `remote_host`
+  - `session_id`
+  - `session_line_num`
+  - `command_tag`
+  - `session_start_time`
+  - `virtual_transaction_id`
+  - `transaction_id`
+  - `error_severity`
+  - `sql_state_code`
+  - `detail_log`
+  - `detail`
+  - `hint`
+  - `internal_query`
+  - `internal_query_pos`
+  - `context`
+  - `query`
+  - `query_pos`
+  - `file_location`
+  - `application_name`
+  - `message`
+
+
+redislog.min_error_statement
+
+: Controls which SQL statements that cause an error condition are
+	recorded in the server log. Each level includes all the levels that
+  follow it. The later the level, the fewer messages are sent.
+  
+redislog.min_messages
+
+: Set the message levels that are logged. Each level includes all
+  the levels that follow it. The higher the level, the fewer messages
+  are sent.
+
+## TODO list
+
+- Support for CSV output format
+- Support for `channel` data type
+- Support for custom fields in JSON objects
 
 ## Authors
 
